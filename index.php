@@ -5,9 +5,7 @@
  *
  * Feel free to contribute!
  */
-
 require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/GoogleApi.php';
 
 if ('cli' !== PHP_SAPI) {
     echo('This application must be run on the command line. You need to modify it a bit to run over the browser :)');
@@ -21,7 +19,7 @@ if ('cli' !== PHP_SAPI) {
  *
  * @return string
  */
-function readFileChunk($handle, int $chunkSize) {
+function readFileChunk($handle, $chunkSize) {
     $byteCount = 0;
     $giantChunk = '';
 
@@ -79,12 +77,47 @@ function remoteMimeType($url) {
  * Upload a file to the google drive.
  */
 try {
-    $googleApi = new GoogleApi();
-    $client = $googleApi->getClient();
+    $credentialsPath = __DIR__ . '/credentials/auth-credentials.json';
+    $clientSecretPath = __DIR__ . '/credentials/oauth-credentials.json';
+    # Change to "Google_Service_Drive::DRIVE_FILE" later
+    $scopes = [Google_Service_Drive::DRIVE];
+    $client = new \Google_Client();
+    $client->setApplicationName('DRIVE UPLOAD');
+    $client->setScopes($scopes);
+    $client->addScope('https://www.googleapis.com/auth/photoslibrary');
+    $client->setAuthConfig($clientSecretPath);
+    $client->setAccessType('offline');
+    $client->setApprovalPrompt('force');
+    $client->setIncludeGrantedScopes(true);
+    if (file_exists($credentialsPath)) {
+        $accessToken = json_decode(file_get_contents($credentialsPath), true);
+    }else {
+        if (isset($_GET['code'])) {
+            $accessToken = $client->fetchAccessTokenWithAuthCode($_GET['code']);
+            if (!file_exists(dirname($credentialsPath))) {
+                mkdir(dirname($credentialsPath), 0700, true);
+            }
+            file_put_contents($credentialsPath, json_encode($accessToken));
+        }
+        if (!$client->getAccessToken()) {
+            echo $client->createAuthUrl();
+            die;
+        }
+    }
+    $client->setAccessToken($accessToken);
+    if ($client->isAccessTokenExpired()) {
+        $refreshTokenSaved = $client->getRefreshToken();
+        $client->fetchAccessTokenWithRefreshToken($refreshTokenSaved);
+        $accessToken = $client->getAccessToken();
+        $accessToken['refresh_token'] = $refreshTokenSaved;
+        $client->setAccessToken($accessToken);
+        file_put_contents($credentialsPath, json_encode($accessToken));
+    }
+    //upload remote driver
     $service = new Google_Service_Drive($client);
     $getFile = new Google_Service_Drive_DriveFile();
-    $url = 'http://download.thinkbroadband.com/1MB.zip';
-    $getFile->name = 'Test File.zip';
+    $url = 'https://www.quirksmode.org/html5/videos/big_buck_bunny.mp4';
+    $getFile->name = 'The Fiery Priest Ep 3';
     $chunkSizeBytes = 20 * 4 * 256 * 1024;
 
     # Call the API with the media upload, defer so it doesn't immediately return.
@@ -134,6 +167,15 @@ try {
     } else {
         throw new Exception('Upload failed');
     }
+    /*//Get info of a drive file.
+    $uploadedFileId = '1BxcrKGhWuh32jpoURlUFIwZXiMub-qXrug';
+    $service = new Google_Service_Drive($client);
+    $getFile = $service->files->get(
+        $uploadedFileId, ['fields' => '*']
+    );
+    echo '<pre>';
+    print_r($getFile);
+    echo '</pre>';*/
 } catch (Exception $e) {
     print 'An error occurred: ' . $e->getMessage();
 }
